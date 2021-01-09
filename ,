@@ -1,0 +1,121 @@
+# secdb
+> A library for creating CMAs and SAAs.
+
+This package contains a number of libraries for working with time 
+series and meta data, and provides objects for working with common types of
+financial data like yield curves, bonds and FX forwards. Built on top of these
+lower-level libraries are Capital Market Assumptions (CMAs) for a range of asset
+classes, and optimization models that create Strategic Asset Allocations (SAAs).
+
+
+## Installation and Setup
+
+Windows:
+
+1. Download the pysecdb codebase from github, and store it on your computer. 
+2. Rename the main folder from pysecdb-master to just pysecdb
+3. Make sure Anaconda and Jupyter are both installed
+4. Create a virtual environment for python, containing all of the required libraries, with the following steps:
+    1. Open a 'cmd' window
+    2. 'cd' into the pysecdb directory
+    3. Create a new virtual environment named 'pysaa' by running the following command:
+    ```
+    >> conda create -y --name pysaa python=3.7
+    ```   
+    4. Install all of the required packages (as specified in the requirements.txt file) into your 
+       new virtual environment 'pysaa' by running:
+    ```
+    >> conda install --force-reinstall -y -q --name pysaa -c conda-forge --file requirements.txt`
+    ```
+    5. To make sure that the 'pysaa' virtual environment is accessible via Jupyter, run the command:
+    ```
+    >> ipython kernel install --user --name=pysaa
+    ```
+    6. *(optional)* if you intend to run the optimization libraries, then you will need to install 
+    	cvxpy as well. This package is left out of the requirements.txt file because its installation can
+    	be tricky and cause the entire installation to fail. Try to install cvxpy using conda:  
+    	```
+    	>> conda install cvxpy
+    	```  
+    	If that doesn't work, try using pip for the installation:  
+    	```
+    	>> pip install cvxpy
+    	```
+    	
+5. Copy the time series data folder 'ts_data' into your pysecdb/data folder. When you are done, the 'data'
+folder should contain the 4 folders: 'cma', 'saa', 'meta_data' and 'ts_data'.  
+**Note:** The time series data is too large to be stored in github, which is why it must be kept separately.
+
+
+## Running the code via Jupyter
+
+1. Open a 'cmd' window
+2. 'cd' into the pysecdb directory
+3. Enter the 'pysaa' virtual environment by running the command:\
+```>> conda activate pysaa```
+4. Start a Jupyter session by running:\
+```>> jupyter notebook```
+
+The final step should open a tab in your web browser, and should display the file contents within pysecdb.
+You can now navigate through the code in your browser window, and open and run notebooks.
+
+Make sure that the python kernel being used by Jupyter is 'pysaa', and not some other python kernel.
+You can check this by clicking on the 'kernel' menu at the top of the Jupyter browser.
+
+
+# **Additional Documentation**
+
+For additional documentation, please check [docs/build/html/index.html](docs/build/html/index.html). 
+You may need to open this file from its location on your computer in order to view it properly.
+
+This documentation is created using the Python Sphinx package, which reads the comments
+from the Python code and uses it to create documentation. You can learn more about the 
+Sphinx package [here](https://www.sphinx-doc.org/en/master/), 
+and how to update this documentation if you make any changes
+to the comments or code structure that you would like to see represented in the documentation.
+
+To update the documentation, go to the docs/ folder and run
+
+```>> make html```
+
+# Testing
+
+To run all tests from the command line using the unittest package, run:
+```
+python -m unittest discover -s tests -p "test_*.py"
+```
+
+To run only tests in a particular directory, write instead:
+```
+python -m unittest discover -s tests/target_directory_path -p "test_*.py"
+```
+
+
+# Downloading data
+
+To download all data from the command line, run:
+```
+python secdb/database/download.py
+```
+
+To download data from one or more specified sources, instead run:
+```
+python secdb/database/download.py data_source_1 data_source_2 
+```
+
+
+# Meta
+
+Christopher Miller – cmm801@gmail.com
+
+Distributed under the XYZ license. See ``LICENSE`` for more information.
+
+[https://github.com/yourname/github-link](https://github.com/dbader/)
+
+## Contributing
+
+1. Fork it (<https://github.com/cmm801/pysecdb/fork>)
+2. Create your feature branch (`git checkout -b feature/fooBar`)
+3. Commit your changes (`git commit -am 'Add some fooBar'`)
+4. Push to the branch (`git push origin feature/fooBar`)
+5. Create a new Pull Request
