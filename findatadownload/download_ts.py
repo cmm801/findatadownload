@@ -5,7 +5,7 @@ import datetime
 import io
 import numpy as np
 import pandas as pd
-import pandas_datareader as pdr
+import pandas_datareader.data as web
 import requests_cache
 import time
 import urllib.request
@@ -13,7 +13,7 @@ import yfinance as yf
 
 
 def download_time_series(data_source, base_ticker, start=None, end=None, 
-                         frequency=None, period=None):
+                         frequency=None, period=None, session=None):
     """ Download data for a single base ticker (which may yield one or more time series).
 
         Returns pandas DataFrame object with datetimes as the index and tickers as columns.
@@ -27,9 +27,9 @@ def download_time_series(data_source, base_ticker, start=None, end=None,
     elif data_source == 'acm':
         # Daily US Term Premium estimate from ACM/Fed
         dobj = ACMDownloader()
-    elif data_source == 'kenfrench':
+    elif data_source == 'famafrench':
         # Daily Fama French factor data
-        dobj = KenFrenchDownloader()
+        dobj = FamaFrenchDownloader()
     elif data_source == 'yahoo':
         # Daily Yahoo data
         dobj = YahooDownloader()
@@ -41,7 +41,7 @@ def download_time_series(data_source, base_ticker, start=None, end=None,
 
     # Download the time series data
     ts = dobj.download_time_series(base_ticker, start=start, end=end,
-                                   frequency=frequency, period=period)
+                   frequency=frequency, period=period, session=session)
     
     if not isinstance(ts.index, pd.DatetimeIndex):
         raise ValueError('The index of the output must be a pandas DatetimeIndex.')
@@ -56,14 +56,14 @@ class AbstractDownloader(ABC):
         pass
 
     def download_time_series(self, base_ticker, start=None, end=None,
-                             frequency=None, period=None):
+                             frequency=None, period=None, session=None):
         # parse arguments and make sure they are in a consistent format
         start, end, frequency, period = self._standardize_arguments(start=start,
-                                        end=end, frequency=frequency, period=period)
+                                    end=end, frequency=frequency, period=period)
         
         # Get the downloaded raw time series
         raw_ts = self._download_raw_time_series(base_ticker, start=start, end=end, 
-                                                frequency=frequency, period=period)
+                                    frequency=frequency, period=period, session=session)
 
         # Rename any columns if necessary
         ts = self._rename_time_series(raw_ts, base_ticker)
@@ -79,7 +79,7 @@ class AbstractDownloader(ABC):
 
     @abstractmethod
     def _download_raw_time_series(self, base_ticker, start=None, end=None,
-                                  frequency=None, period=None):
+                                  frequency=None, period=None, session=None):
         """ This method gets the raw time series from the data source.
         """
         raise NotImplementedError('Must be implemented by the subclass.')
@@ -104,6 +104,24 @@ class AbstractDownloader(ABC):
 
 
 class PandasDatareaderDownloader(AbstractDownloader):
+    @property
+    def data_source(self):
+        raise NotImplementedError('Must be implemented by the base class.')
+
+    # Implement abstractmethod
+    def _download_raw_time_series(self, base_ticker, start=None, end=None,
+                                  frequency=None, period=None, session=None):
+        """ This method gets the raw time series from the data source.
+        """
+        if period is not None:
+            raise NotImplementedError(f'"period" has value {period} but is not implemented.')
+
+        if period is not None:
+            raise NotImplementedError(f'"frequency" has value {frequency} but is not implemented.')
+
+        data = web.DataReader(base_ticker, self.data_source, start=start, end=end, session=session)        
+        return data
+
     def _format_input_arguments(self, start=None, end=None, frequency=None, period=None):
         """ Make adjustments to input arguments so they can be processed by pandas_datareader.
         
@@ -114,12 +132,97 @@ class PandasDatareaderDownloader(AbstractDownloader):
                                         end=end, frequency=frequency, period=period)
         return start, end, frequency, period
 
+
+class FREDDownloader(PandasDatareaderDownloader):
+    @property
+    def data_source(self):
+        return 'fred'
+
+
+class FamaFrenchDownloader(PandasDatareaderDownloader):
+    COLUMN_MAP = {
+        'Developed_5_Factors_daily' : {
+            'MKT-RF' : 'FFDEVMKT', 'SMB' : 'FFDEVSMB', 'HML' : 'FFDEVHML',
+            'RMW' : 'FFDEVRMW', 'CMA' : 'FFDEVCMA', 'RF' : 'FFDEVRF'
+        },
+        'Developed_Mom_Factor_daily' : {
+            'WML' : 'FFDEVMOM', 'MOM' : 'FFDEVMOM'
+        },
+        'F-F_Research_Data_5_Factors_2x3_daily' : {
+            'MKT-RF' : 'FFUSMKT', 'SMB' : 'FFUSSMB', 'HML' : 'FFUSHML',
+            'RMW' : 'FFUSRMW', 'CMA' : 'FFUSCMA', 'RF' : 'FFUSRF'
+        },
+        'F-F_Momentum_Factor_Daily' : {
+            'WML' : 'FFUSMOM', 'MOM' : 'FFUSMOM'
+        },
+    }
+
+    @property
+    def data_source(self):
+        return 'famafrench'
+
     # Implement abstractmethod
     def _download_raw_time_series(self, base_ticker, start=None, end=None,
-                                  frequency=None, period=None):
+                                  frequency=None, period=None, session=None):
         """ This method gets the raw time series from the data source.
         """
-        pass
+        raw_data = super()._download_raw_time_series(base_ticker, self.data_source, 
+                        start=start, end=end, freq=frequency, session=session)
+            
+        # Get the monthly data/daily data
+        # The 0-th index is the daily or monthly data - the 1-st index is annual data
+        ts = raw_data[0]
+
+        # Reset the index to use pandas DatetimeIndex objects
+        if not isinstance(ts.index, pd.DatetimeIndex):
+            ts.index = ts.index.to_timestamp()
+        return ts
+
+    def _rename_time_series(self, ts, base_ticker):
+        """ Rename columns to use our internal names rather than those from the data source.
+        """
+        ts = super()._rename_time_series(ts, base_ticker)
+        
+        # Get rid of whitespace in the names
+        ff_ts = ts.copy()
+        ff_ts.columns = [col.upper().replace(' ', '') for col in ts.columns]
+        
+        # Rename the columns
+        ff_ts = ff_ts.rename(self.COLUMN_MAP[base_ticker], axis=1)
+        return ff_ts
+
+
+class YahooDownloader(PandasDatareaderDownloader):
+    @property
+    def data_source(self):
+        return 'yahoo'
+
+    # Overload superclass method
+    def _standardize_arguments(self, start=None, end=None, frequency=None, period=None):
+        """ Standardize input arguments so the lower-level functions know what data type to expect.
+        """
+        # Call superclass method to parse arguments and make sure they are in a standardized format.
+        start, end, frequency, period = super()._standardize_arguments(start=start,
+                                        end=end, frequency=frequency, period=period)
+        if frequency is None:
+            frequency = '1d'
+        return start, end, frequency, period
+
+    def _rename_time_series(self, ts, base_ticker):
+        """ Rename columns to use our internal names rather than those from the data source.
+        """
+        ts = super()._rename_time_series(ts, base_ticker)
+
+        # Rename the columns
+        col_map = {'Open' : f'{base_ticker}(PO)',
+                   'Close' : f'{base_ticker}(PC)',
+                   'High' : f'{base_ticker}(PH)',
+                   'Low' : f'{base_ticker}(PL)',
+                   'Volume' : f'{base_ticker}(VO)',
+                   'Adj Close' : f'{base_ticker}(RI)',
+                  }        
+        ts = ts.rename(col_map, axis=1)
+        return ts
 
 
 class GSWDownloader(AbstractDownloader):
@@ -127,7 +230,7 @@ class GSWDownloader(AbstractDownloader):
     
     # Implement abstractmethod
     def _download_raw_time_series(self, base_ticker, start=None, end=None,
-                                  frequency=None, period=None):
+                                  frequency=None, period=None, session=None):
         """ This method gets the raw time series for the GSW US yield curve data.
         
             The base ticker gets ignored in this class, since there is only 1 dataset.
@@ -169,152 +272,15 @@ class ACMDownloader(AbstractDownloader):
     
     # Implement abstractmethod
     def _download_raw_time_series(self, base_ticker, start=None, end=None,
-                                  frequency=None, period=None):
+                                  frequency=None, period=None, session=None):
         """ This method gets the raw time series for the ACM term premium data.
         
             The base ticker gets ignored in this class, since there is only 1 dataset.        
-        """
+        """ 
         ts = pd.read_excel(self.ACM_URL, sheet_name=self.ACM_SHEETNAME)
         ts = ts.set_index(self.ACM_INDEX_COL)
         ts.index = pd.DatetimeIndex(ts.index)
         return ts
-
-
-class FREDDownloader(PandasDatareaderDownloader):
-    # Implement abstractmethod
-    def _download_raw_time_series(self, base_ticker, start=None, end=None,
-                                  frequency=None, period=None):
-        """ This method gets the raw time series from the data source.
-        """
-        fred_obj = pdr.fred.FredReader([base_ticker], start=start, end=end)
-        ts = fred_obj.read()
-        return ts
-
-
-class KenFrenchDownloader(PandasDatareaderDownloader):
-    COLUMN_MAP = {
-        'Developed_5_Factors_daily' : {
-            'MKT-RF' : 'FFDEVMKT', 'SMB' : 'FFDEVSMB', 'HML' : 'FFDEVHML',
-            'RMW' : 'FFDEVRMW', 'CMA' : 'FFDEVCMA', 'RF' : 'FFDEVRF'
-        },
-        'Developed_Mom_Factor_daily' : {
-            'WML' : 'FFDEVMOM', 'MOM' : 'FFDEVMOM'
-        },
-        'F-F_Research_Data_5_Factors_2x3_daily' : {
-            'MKT-RF' : 'FFUSMKT', 'SMB' : 'FFUSSMB', 'HML' : 'FFUSHML',
-            'RMW' : 'FFUSRMW', 'CMA' : 'FFUSCMA', 'RF' : 'FFUSRF'
-        },
-        'F-F_Momentum_Factor_Daily' : {
-            'WML' : 'FFUSMOM', 'MOM' : 'FFUSMOM'
-        },
-    }
-    
-    # Implement abstractmethod
-    def _download_raw_time_series(self, base_ticker, start=None, end=None,
-                                  frequency=None, period=None):
-        """ This method gets the raw time series from the data source.
-        """
-        if period is not None:
-            raise NotImplementedError(f'The argument "period" has value {period} but is not supported.')
-
-        ff_reader = pdr.famafrench.FamaFrenchReader(base_ticker, start=start, end=end,
-                                                    freq=frequency)
-
-        # Get the monthly data
-        # The 0-th index is the daily or monthly data - the 1-st index is annual data
-        ff_ts = ff_reader.read()[0] 
-
-        # Reset the index to use pandas DatetimeIndex objects
-        if not isinstance(ff_ts.index, pd.DatetimeIndex):
-            ff_ts.index = ff_ts.index.to_timestamp()
-
-        # Return the time series data
-        return ff_ts
-
-    def _rename_time_series(self, ts, base_ticker):
-        """ Rename columns to use our internal names rather than those from the data source.
-        """
-        ts = super()._rename_time_series(ts, base_ticker)
-        
-        # Get rid of whitespace in the names
-        ff_ts = ts.copy()
-        ff_ts.columns = [col.upper().replace(' ', '') for col in ts.columns]
-        
-        # Rename the columns
-        ff_ts = ff_ts.rename(self.COLUMN_MAP[base_ticker], axis=1)
-        return ff_ts
-
-
-class YahooDownloader(AbstractDownloader):
-    # Implement abstractmethod
-    def _download_raw_time_series(self, base_ticker, start=None, end=None,
-                                  frequency=None, period=None):
-        """ Download Yahoo time series for a single base ticker.
-        
-            Arguments:
-        """
-        yahoo_tkr_obj = yf.Ticker(base_ticker)
-        ts = yahoo_tkr_obj.history(start=start, end=end, period=period, interval=frequency)
-        return ts
-
-    # Overload superclass method
-    def _standardize_arguments(self, start=None, end=None, frequency=None, period=None):
-        """ Standardize input arguments so the lower-level functions know what data type to expect.
-        """
-        # Call superclass method to parse arguments and make sure they are in a standardized format.
-        start, end, frequency, period = super()._standardize_arguments(start=start,
-                                        end=end, frequency=frequency, period=period)
-        if frequency is None:
-            frequency = '1d'
-        return start, end, frequency, period
-
-    def _rename_time_series(self, ts, base_ticker):
-        """ Rename columns to use our internal names rather than those from the data source.
-        """
-        ts = super()._rename_time_series(ts, base_ticker)
-
-        # Rename the columns
-        col_map = {'Open' : f'{base_ticker}(PO)',
-                   'Close' : f'{base_ticker}(PC)',
-                   'High' : f'{base_ticker}(PH)',
-                   'Low' : f'{base_ticker}(PL)',
-                   'Volume' : f'{base_ticker}(VO)',
-                   'Dividends' : f'{base_ticker}(DIV)',                   
-                   'Stock Splits' : f'{base_ticker}(SS)',
-                  }        
-        ts = ts.rename(col_map, axis=1)
-        return ts
-
-    def _add_constructed_time_series(self, ts, base_ticker):
-        """ Calculate the total return index from downloaded Yahoo data.
-        """
-        # Call superclass method
-        ts = super()._add_constructed_time_series(ts, base_ticker)
-        
-        # Get the prices and dividends for the target security (ticker)
-        price_ticker = f'{base_ticker}(PC)'
-        div_ticker = f'{base_ticker}(DIV)'
-        prices = ts[price_ticker]
-        income = ts[div_ticker]
-
-        # Drop dates where there is no data
-        prices, income = prices.dropna().align(income.dropna(), axis=0)
-
-        # Calculate the price returns
-        price_rtns = -1 + prices / prices.shift(1).values
-        price_rtns.iloc[0] = 0.0
-
-        # Calculate the dividend returns
-        div_rtns = income / prices.shift(1).values
-        div_rtns.iloc[0] = 0.0
-
-        # Calculate the total return index
-        tr_index = np.cumprod(1 + price_rtns + div_rtns) * prices.iloc[0]
-        tr_index.name = f'{base_ticker}(RI)'
-        
-        # Combine the old and new time series and return the result
-        combined_ts = pd.concat([ts, tr_index], axis=1)
-        return combined_ts
 
 
 class CoinbaseProDownloader(AbstractDownloader):
@@ -325,7 +291,7 @@ class CoinbaseProDownloader(AbstractDownloader):
 
     # Implement abstractmethod
     def _download_raw_time_series(self, base_ticker, start=None, end=None,
-                                  frequency=None, period=None):
+                                  frequency=None, period=None, session=None):
         """ Download CoinbasePro time series for a single base ticker.
         
             Arguments:
@@ -360,7 +326,7 @@ class CoinbaseProDownloader(AbstractDownloader):
                     success = True
 
             # Convert the data into a pandas DataFrame object
-            sub_ts = pd.DataFrame(raw_data).set_index('time')
+            sub_ts = pd.DataFrame(raw_data)
             ts_list.append(sub_ts)
 
             # Update the start/end times
@@ -370,8 +336,20 @@ class CoinbaseProDownloader(AbstractDownloader):
         # Combine the time series into a single object
         ts = pd.concat(ts_list, axis=0)
         
+        # Define the list of expected columns
+        expected_columns = set(['high', 'low', 'open', 'close', 'volume', 'time'])
+
+        # Set the index
+        if ts.shape[0]:
+            if set(ts.columns) != expected_columns:
+                raise ValueError('Unexpected or missing columns from CoinbasePro.')
+            else:
+                ts = ts.set_index('time')
+        else:
+            ts = pd.DataFrame([], columns=expected_columns).set_index('time')
+        
         # Convert the data to a data frame and convert the columns to float
-        for col in [ 'high', 'low', 'open', 'close', 'volume']:
+        for col in ts.columns:
             ts[col] = ts[col].astype('float')
 
         # Sort the dates in ascending order
