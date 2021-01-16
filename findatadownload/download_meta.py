@@ -2,9 +2,58 @@ import os
 import datetime
 import numpy as np
 import pandas as pd
+import yfinance as yf
 
 EODDATA_EXCHANGES = ['NYSE', 'NASDAQ', 'AMEX']
 
+
+def clean_fred_metadata(full_filename: str):
+    """Extract meta data from the README file for a FRED data list.
+    
+    Arguments:
+        full_filename (str): the full filename and path to the text file 
+            returned from FRED, containing information on the time series.
+            
+    Returns:
+        df (pd.DataFrame): A DataFrame object containing the meta data
+    """
+    data = []
+    SERIES_ID = 'Series ID'
+    with open(full_filename, "r") as f:
+
+        def fast_forward_to_next_series():
+            line = f.readline()
+            while line and not line.startswith(SERIES_ID):
+                line = f.readline()
+            return line.replace('\n', '').strip()
+
+        info = {SERIES_ID: ''}
+        key = fast_forward_to_next_series()
+        for line in f:
+            line = line.replace('\n', '').strip()
+            if line.startswith("-----"):
+                next_line_is_val = True
+            elif not line:
+                key = None
+                next_line_is_val = False
+            elif line == SERIES_ID:
+                data.append(info)
+                key = SERIES_ID
+                info = {SERIES_ID: ''}
+            elif line.startswith('Notes'):            
+                data.append(info)
+                key = SERIES_ID
+                info = {SERIES_ID: ''}
+                fast_forward_to_next_series()            
+            elif key is None:
+                key = line
+                info[key] = ''
+            else:
+                info[key] += line
+
+        df = pd.DataFrame(data)
+        df = df.set_index('Series ID', drop=False)
+        return df
 
 def _parse_eoddata_symbol_list(filename):
     """ Parse the meta data from EODDATA.com, and return a DataFrame. """
@@ -62,3 +111,4 @@ def combine_symbol_lists(base_path):
     df = df.drop_duplicates(['symbol', 'name'], keep='first')
     df = df.set_index('symbol')
     return df
+

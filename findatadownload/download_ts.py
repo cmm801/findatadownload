@@ -9,7 +9,10 @@ import pandas_datareader.data as web
 import requests_cache
 import time
 import urllib.request
-import yfinance as yf
+
+import ibk.connect
+import ibk.constants
+import ibk.master
 
 
 def download_time_series(data_source, base_ticker, start=None, end=None, 
@@ -36,6 +39,9 @@ def download_time_series(data_source, base_ticker, start=None, end=None,
     elif data_source == 'cbp':
         # Daily CoinbasePro data
         dobj = CoinbaseProDownloader()
+    elif data_source == 'ib':
+        # Daily CoinbasePro data
+        dobj = InteractiveBrokersDownloader()
     else:
         raise ValueError(f'Unknown data source: "{data_source}"')
 
@@ -87,6 +93,12 @@ class AbstractDownloader(ABC):
     def _standardize_arguments(self, start=None, end=None, frequency=None, period=None):
         """ Standardize input arguments so the lower-level functions know what data type to expect.
         """
+        if end is None:
+            end = datetime.datetime.now()
+            
+        if frequency is None:
+            frequency = '1d'
+
         return start, end, frequency, period
 
     def _add_constructed_time_series(self, ts, base_ticker):
@@ -320,7 +332,10 @@ class CoinbaseProDownloader(AbstractDownloader):
                                                 stop=period_end, granularity=granularity)
                 except cbp.exceptions.RateLimitError:
                     time.sleep(1/self.MAX_REQUEST_PER_SECOND)
-                except :
+                except KeyboardInterrupt:
+                    # Allow the user to exit via the keyboard interrupt...
+                    raise KeyboardInterrupt
+                except:
                     print('handling error')
                 else:
                     success = True
@@ -407,3 +422,73 @@ class CoinbaseProDownloader(AbstractDownloader):
         tickers = [f'{base_ticker}({series_type})' for series_type in series_types]
         ts.columns = tickers
         return ts
+
+
+class InteractiveBrokersDownloader(AbstractDownloader):
+    _app = None
+
+    @property
+    def app(self):
+        if self._app is not None:
+            return self._app
+        else:
+            # First try connecting to the paper portfolio
+            self._app = ibk.master.Master(port=ibk.constants.PORT_PAPER)
+
+            # Check if we can access market data from the paper portfolio
+            try:
+                self._app.marketdata_app
+                
+                # If this worked, then we can return the class handle
+                return self._app
+            except ibk.connect.ConnectionNotEstablishedError:
+                self._app = ibk.master.Master(port=ibk.constants.PORT_PROD)
+                
+                # Try to access market data from the production portfolio
+                try:
+                    self._app.marketdata_app
+                    
+                    # If this worked, then we can return the class handle
+                    return self._app                    
+                except ibk.connect.ConnectionNotEstablishedError:
+                    raise ValueError('No connection to Interactive Brokers is detected. Try logging in.')
+
+    # Implement abstractmethod
+    def _download_raw_time_series(self, base_ticker, start=None, end=None,
+                                  frequency=None, period=None, session=None):
+        """ This method gets the raw time series for the ACM term premium data.
+        
+            The base ticker gets ignored in this class, since there is only 1 dataset.        
+        """ 
+        # Get the relevant contract for the ticker symbol
+        _contract = self.app.get_contract(base_ticker)
+        contractList = [_contract]
+        
+        # Create a historical request object
+        reqObjList = self.app.get_historical_data(contractList, start=start, end=end,
+                                             frequency=frequency, use_rth=False, data_type="TRADES")
+        reqObj = reqObjList[0]
+        
+        # Wait until the request is complete
+        max_wait_time = 10
+        t0 = time.time()
+        while not reqObj.is_request_complete() and time.time() - t0 < max_wait_time:
+            time.sleep(0.1)
+            
+        return reqObj.get_dataframe(timestamp=False)
+
+    # Overload superclass method
+    def _rename_time_series(self, ts, base_ticker):
+        return ts
+    
+    # Overload superclass method
+    def _standardize_arguments(self, start=None, end=None, frequency=None, period=None):
+        # Call the superclass method first
+        start, end, frequency, period = super()._standardize_arguments(start=start, end=end,
+                                                                       frequency=frequency, period=period)
+        
+        # Convert the arguments into the format the IB requires
+        ST = start.strftime('%Y%m%d %H:%M:%S')
+        ET = end.strftime('%Y%m%d %H:%M:%S')        
+        return ST, ET, frequency, period
+        
