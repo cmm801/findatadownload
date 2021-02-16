@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 import coinbasepro as cbp
 import csv
 import datetime
+import httplib2
 import io
 import numpy as np
 import pandas as pd
@@ -16,7 +17,7 @@ import ibk.master
 
 
 def download_time_series(data_source, base_ticker, start=None, end=None, 
-                         frequency=None, period=None, session=None):
+                         frequency=None, period=None, session=None, max_wait_time=None):
     """ Download data for a single base ticker (which may yield one or more time series).
 
         Returns pandas DataFrame object with datetimes as the index and tickers as columns.
@@ -42,12 +43,15 @@ def download_time_series(data_source, base_ticker, start=None, end=None,
     elif data_source == 'ib':
         # Daily CoinbasePro data
         dobj = InteractiveBrokersDownloader()
+    elif data_source == 'cboe':
+        # VIX Futures data
+        dobj = CBOEDownloader()
     else:
         raise ValueError(f'Unknown data source: "{data_source}"')
 
     # Download the time series data
-    ts = dobj.download_time_series(base_ticker, start=start, end=end,
-                   frequency=frequency, period=period, session=session)
+    ts = dobj.download_time_series(base_ticker, start=start, end=end, frequency=frequency,
+                       period=period, session=session, max_wait_time=max_wait_time)
     
     if not isinstance(ts.index, pd.DatetimeIndex):
         raise ValueError('The index of the output must be a pandas DatetimeIndex.')
@@ -61,15 +65,18 @@ class AbstractDownloader(ABC):
     def __init__(self):
         pass
 
-    def download_time_series(self, base_ticker, start=None, end=None,
-                             frequency=None, period=None, session=None):
+    def download_time_series(self, base_ticker, start=None, end=None, frequency=None, 
+                                     period=None, session=None, max_wait_time=None):
+        """ Download time series from various underlying methods.
+        """
         # parse arguments and make sure they are in a consistent format
         start, end, frequency, period = self._standardize_arguments(start=start,
                                     end=end, frequency=frequency, period=period)
         
         # Get the downloaded raw time series
         raw_ts = self._download_raw_time_series(base_ticker, start=start, end=end, 
-                                    frequency=frequency, period=period, session=session)
+                                        frequency=frequency, period=period,
+                                        session=session, max_wait_time=max_wait_time)
 
         # Rename any columns if necessary
         ts = self._rename_time_series(raw_ts, base_ticker)
@@ -84,8 +91,8 @@ class AbstractDownloader(ABC):
         return ts_full
 
     @abstractmethod
-    def _download_raw_time_series(self, base_ticker, start=None, end=None,
-                                  frequency=None, period=None, session=None):
+    def _download_raw_time_series(self, base_ticker, start=None, end=None, frequency=None, 
+                                  period=None, session=None, max_wait_time=None):
         """ This method gets the raw time series from the data source.
         """
         raise NotImplementedError('Must be implemented by the subclass.')
@@ -121,8 +128,8 @@ class PandasDatareaderDownloader(AbstractDownloader):
         raise NotImplementedError('Must be implemented by the base class.')
 
     # Implement abstractmethod
-    def _download_raw_time_series(self, base_ticker, start=None, end=None,
-                                  frequency=None, period=None, session=None):
+    def _download_raw_time_series(self, base_ticker, start=None, end=None, frequency=None, 
+                                  period=None, session=None, max_wait_time=None):
         """ This method gets the raw time series from the data source.
         """
         if period is not None:
@@ -174,8 +181,8 @@ class FamaFrenchDownloader(PandasDatareaderDownloader):
         return 'famafrench'
 
     # Implement abstractmethod
-    def _download_raw_time_series(self, base_ticker, start=None, end=None,
-                                  frequency=None, period=None, session=None):
+    def _download_raw_time_series(self, base_ticker, start=None, end=None, frequency=None,
+                                  period=None, session=None, max_wait_time=None):
         """ This method gets the raw time series from the data source.
         """
         raw_data = super()._download_raw_time_series(base_ticker, self.data_source, 
@@ -241,8 +248,8 @@ class GSWDownloader(AbstractDownloader):
     URL_GSW = 'https://www.federalreserve.gov/data/yield-curve-tables/feds200628.csv'
     
     # Implement abstractmethod
-    def _download_raw_time_series(self, base_ticker, start=None, end=None,
-                                  frequency=None, period=None, session=None):
+    def _download_raw_time_series(self, base_ticker, start=None, end=None, frequency=None,
+                                  period=None, session=None, max_wait_time=None):
         """ This method gets the raw time series for the GSW US yield curve data.
         
             The base ticker gets ignored in this class, since there is only 1 dataset.
@@ -283,8 +290,8 @@ class ACMDownloader(AbstractDownloader):
     ACM_INDEX_COL = 'DATE'
     
     # Implement abstractmethod
-    def _download_raw_time_series(self, base_ticker, start=None, end=None,
-                                  frequency=None, period=None, session=None):
+    def _download_raw_time_series(self, base_ticker, start=None, end=None, frequency=None,
+                                  period=None, session=None, max_wait_time=None):
         """ This method gets the raw time series for the ACM term premium data.
         
             The base ticker gets ignored in this class, since there is only 1 dataset.        
@@ -302,8 +309,8 @@ class CoinbaseProDownloader(AbstractDownloader):
     DEFAULT_START_DATE = datetime.datetime(2015, 12, 31) 
 
     # Implement abstractmethod
-    def _download_raw_time_series(self, base_ticker, start=None, end=None,
-                                  frequency=None, period=None, session=None):
+    def _download_raw_time_series(self, base_ticker, start=None, end=None, frequency=None,
+                                  period=None, session=None, max_wait_time=None):
         """ Download CoinbasePro time series for a single base ticker.
         
             Arguments:
@@ -454,14 +461,27 @@ class InteractiveBrokersDownloader(AbstractDownloader):
                     raise ValueError('No connection to Interactive Brokers is detected. Try logging in.')
 
     # Implement abstractmethod
-    def _download_raw_time_series(self, base_ticker, start=None, end=None,
-                                  frequency=None, period=None, session=None):
-        """ This method gets the raw time series for the ACM term premium data.
+    def _download_raw_time_series(self, base_ticker, start=None, end=None, frequency=None, 
+                                  period=None, session=None, max_wait_time=None):
+        """ This method downloads the raw time series using the InteractiveBroker's API.
         
-            The base ticker gets ignored in this class, since there is only 1 dataset.        
+            Arguments:
+                base_ticker: (str) the IB ticker (localSymbol) associated with the time series.
+                    For continuous futures contracts, us the ticker followed by _CNT. For example,
+                    'ES_CNT' would the the base ticker to get continuous futures data for 'ES'.
+                start/end: the start/end date/time for the historical request
+                frequency: (str) the frequency of the data to be returned
         """ 
         # Get the relevant contract for the ticker symbol
-        _contract = self.app.get_contract(base_ticker)
+        if base_ticker.endswith('_CNT'):
+            # If the ticker ends with _CNT, then the user is requesting a continuous futures contract
+            underlier_ticker = base_ticker[:-4]
+            contract_details = self.app.get_continuous_futures_contract_details(underlier_ticker)
+            _contract = contract_details.contract
+        else:
+            # ...otherwise, get a normal contract
+            _contract = self.app.get_contract(base_ticker)
+            
         contractList = [_contract]
         
         # Create a historical request object
@@ -470,7 +490,8 @@ class InteractiveBrokersDownloader(AbstractDownloader):
         reqObj = reqObjList[0]
         
         # Wait until the request is complete
-        max_wait_time = 10
+        if max_wait_time is None:
+            max_wait_time = 1e6   # Wait very long time if no max. wait time is specified
         t0 = time.time()
         while not reqObj.is_request_complete() and time.time() - t0 < max_wait_time:
             time.sleep(0.1)
@@ -479,6 +500,14 @@ class InteractiveBrokersDownloader(AbstractDownloader):
 
     # Overload superclass method
     def _rename_time_series(self, ts, base_ticker):
+        # Get the map from the CBP names to our internal names
+        series_type_map = pd.Series({'open' : 'PO', 'close' : 'PC', 
+                                     'high' : 'PH', 'low' : 'PL', 'volume' : 'VO',
+                                     'barCount' : 'BARCT', 'average' : 'VWAP'})
+
+        series_types = series_type_map[ts.columns.values]
+        tickers = [f'{base_ticker}({series_type})' for series_type in series_types]
+        ts.columns = tickers
         return ts
     
     # Overload superclass method
@@ -491,4 +520,97 @@ class InteractiveBrokersDownloader(AbstractDownloader):
         ST = start.strftime('%Y%m%d %H:%M:%S')
         ET = end.strftime('%Y%m%d %H:%M:%S')        
         return ST, ET, frequency, period
+
+
+class CBOEDownloader(AbstractDownloader):
+    BASE_URL = 'https://markets.cboe.com/us/futures/market_statistics/historical_data/products/csv/VX'
+
+    # Implement abstractmethod
+    def _download_raw_time_series(self, base_ticker, start=None, end=None, frequency=None, 
+                                  period=None, session=None, max_wait_time=None):
+        """ This method downloads time series from .csv files on the CBOE website.
         
+            Arguments:
+                base_ticker: (str) a string containing the futures
+                    ticker symbol (e.g. 'VX' or 'ES') and the expiry datetime of the contract.
+                    For example, this would be VX20210317 for a VIX future expiring 2021-03-17.
+                start/end: the start/end date/time for the historical request
+                frequency: (str) the frequency of the data to be returned. Default is daily data.
+        """ 
+        # Parse the symbol to extract the expiration date
+        symbol, expiry = self._parse_ticker(base_ticker)
+
+        if expiry is None:
+            df = self._download_index_time_series(symbol)
+        else:
+            df = self._download_futures_time_series(symbol, expiry)
+            
+        if start is not None:
+            df = df.loc[pd.Timestamp(start) <= df.index]
+
+        if end is not None:
+            df = df.loc[df.index <= pd.Timestamp(end)]
+
+        return df
+    
+    def _download_index_time_series(self, symbol):
+        if symbol != 'VIX':
+            raise NotImplementedError('Only VIX futures data is currently available.')
+
+        filename_curr = 'https://ww2.cboe.com/publish/scheduledtask/mktdata/datahouse/vixcurrent.csv'
+        df = pd.read_csv(filename_curr, header=1)
+
+        df.set_index('Date', inplace=True)
+        df.index = pd.DatetimeIndex(df.index)
+        df.index.name = 'pricing_date'
+        return df
+
+    def _download_futures_time_series(self, symbol, expiry): 
+        """ Download futures time series. """
+        if symbol != 'VX':
+            raise NotImplementedError('Only VIX futures data is currently available.')
+            
+        # Check if the URL exists for this expiry date
+        url = f'{self.BASE_URL}/{expiry}/'
+        http = httplib2.Http()
+        resp = http.request(url, 'HEAD')
+        if int(resp[0]['status']) >= 400:
+            raise ValueError(f'No futures data found for "{symbol}" expiry: "{expiry}"')
+        else:
+            df = pd.read_csv(url)
+            df.drop(['Change', 'Futures'], axis=1, inplace=True)
+
+        # Set the index
+        df.set_index('Trade Date', inplace=True)
+        df.index = pd.DatetimeIndex(df.index)
+        df.index.name = 'pricing_date'
+        return df
+
+    # Overload superclass method
+    def _rename_time_series(self, ts, base_ticker):
+        # Get the map from the CBP names to our internal names
+        series_type_map = pd.Series({'Open' : 'PO', 'VIX Open' : 'PO', 
+                                     'Close' : 'PC', 'VIX Close' : 'PC',
+                                     'High' : 'PH', 'VIX High' : 'PH',
+                                     'Low' : 'PL', 'VIX Low' : 'PL',
+                                     'Settle' : 'PS',
+                                     'Total Volume' : 'VO',
+                                     'EFP' : 'EFP', 'Open Interest' : 'OI'})
+
+        series_types = series_type_map[ts.columns.values]
+        tickers = [f'{base_ticker}({series_type})' for series_type in series_types]
+        ts.columns = tickers
+        return ts
+
+    def _parse_ticker(self, base_ticker):
+        """ Extract the symbol and expiry date (if there is one) from the base ticker. """
+        if len(base_ticker) == 3:
+            # Index data
+            symbol = base_ticker
+            expiry = None
+        else:
+            # Futures data
+            symbol = base_ticker[:2]
+            expiry = pd.Timestamp(base_ticker[2:]).strftime('%Y-%m-%d')
+
+        return symbol, expiry
