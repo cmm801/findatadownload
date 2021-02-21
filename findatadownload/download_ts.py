@@ -562,7 +562,6 @@ class CBOEDownloader(AbstractDownloader):
 
         df.set_index('Date', inplace=True)
         df.index = pd.DatetimeIndex(df.index)
-        df.index.name = 'pricing_date'
         return df
 
     def _download_futures_time_series(self, symbol, expiry): 
@@ -575,7 +574,7 @@ class CBOEDownloader(AbstractDownloader):
         http = httplib2.Http()
         resp = http.request(url, 'HEAD')
         if int(resp[0]['status']) >= 400:
-            raise ValueError(f'No futures data found for "{symbol}" expiry: "{expiry}"')
+            df = pd.DataFrame([], columns=['Trade Date'])
         else:
             df = pd.read_csv(url)
             df.drop(['Change', 'Futures'], axis=1, inplace=True)
@@ -583,7 +582,6 @@ class CBOEDownloader(AbstractDownloader):
         # Set the index
         df.set_index('Trade Date', inplace=True)
         df.index = pd.DatetimeIndex(df.index)
-        df.index.name = 'pricing_date'
         return df
 
     # Overload superclass method
