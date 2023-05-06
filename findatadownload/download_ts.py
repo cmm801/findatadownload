@@ -52,7 +52,7 @@ def download_time_series(data_source, base_ticker, start=None, end=None,
     # Download the time series data
     ts = dobj.download_time_series(base_ticker, start=start, end=end, frequency=frequency,
                        period=period, session=session, max_wait_time=max_wait_time)
-    
+
     if not isinstance(ts.index, pd.DatetimeIndex):
         raise ValueError('The index of the output must be a pandas DatetimeIndex.')
 
@@ -72,7 +72,7 @@ class AbstractDownloader(ABC):
         # parse arguments and make sure they are in a consistent format
         start, end, frequency, period = self._standardize_arguments(start=start,
                                     end=end, frequency=frequency, period=period)
-        
+
         # Get the downloaded raw time series
         raw_ts = self._download_raw_time_series(base_ticker, start=start, end=end, 
                                         frequency=frequency, period=period,
@@ -80,13 +80,13 @@ class AbstractDownloader(ABC):
 
         # Rename any columns if necessary
         ts = self._rename_time_series(raw_ts, base_ticker)
-        
+
         # Add any additional constructed time series
         ts_full = self._add_constructed_time_series(ts, base_ticker)
-        
+
         # Drop any rows where all data is missing
         ts_full.dropna(inplace=True, how='all', axis=0)
-        
+
         # Return the pandas DataFrame
         return ts_full
 
@@ -102,7 +102,7 @@ class AbstractDownloader(ABC):
         """
         if end is None:
             end = datetime.datetime.now()
-            
+
         if frequency is None:
             frequency = '1d'
 
@@ -110,7 +110,7 @@ class AbstractDownloader(ABC):
 
     def _add_constructed_time_series(self, ts, base_ticker):
         """ Add additional constructed time series to the ones that are downloaded.
-        
+
             This function can be overloaded to provide construction methodologies for new time series.
             By default, no new time series are constructed and only the downloaded data is returned.
         """
@@ -135,10 +135,10 @@ class PandasDatareaderDownloader(AbstractDownloader):
         if period is not None:
             raise NotImplementedError(f'"period" has value {period} but is not implemented.')
 
-        if period is not None:
+        if (frequency is not None) and (frequency not in ('1d', 'd')):
             raise NotImplementedError(f'"frequency" has value {frequency} but is not implemented.')
 
-        data = web.DataReader(base_ticker, self.data_source, start=start, end=end, session=session)        
+        data = web.DataReader(base_ticker, self.data_source, start=start, end=end, session=session)
         return data
 
     def _format_input_arguments(self, start=None, end=None, frequency=None, period=None):
