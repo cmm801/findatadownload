@@ -41,7 +41,7 @@ def download_time_series(data_source, base_ticker, start=None, end=None,
         # Daily CoinbasePro data
         dobj = CoinbaseProDownloader()
     elif data_source == 'ib':
-        # Daily CoinbasePro data
+        # Daily Interactive Brokers data
         dobj = InteractiveBrokersDownloader()
     elif data_source == 'cboe':
         # VIX Futures data
