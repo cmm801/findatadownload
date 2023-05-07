@@ -1,5 +1,5 @@
-import findatadownload.download_ts as fdts
-import findatadownload.download_meta as fdmeta
+import findatadownload.tsdata as fdts
+import findatadownload.metadata as fdmeta
 
 
 def download_time_series(data_source, base_ticker, start=None, end=None,
