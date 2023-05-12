@@ -1,0 +1,9 @@
+coinbasepro==0.4.1
+httplib2==0.22.0
+ibk.egg==info
+numpy==1.23.5
+pandas==1.5.1
+pandas_datareader==0.10.0
+requests_cache==1.0.1
+setuptools==67.3.2
+yfinance==0.2.18
