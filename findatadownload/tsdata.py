@@ -74,7 +74,7 @@ class AbstractDownloader(ABC):
                                     end=end, frequency=frequency, period=period)
 
         # Get the downloaded raw time series
-        raw_ts = self._download_raw_time_series(base_ticker, start=start, end=end, 
+        raw_ts = self._download_raw_time_series(base_ticker, start=start, end=end,
                                         frequency=frequency, period=period,
                                         session=session, max_wait_time=max_wait_time)
 
@@ -91,7 +91,7 @@ class AbstractDownloader(ABC):
         return ts_full
 
     @abstractmethod
-    def _download_raw_time_series(self, base_ticker, start=None, end=None, frequency=None, 
+    def _download_raw_time_series(self, base_ticker, start=None, end=None, frequency=None,
                                   period=None, session=None, max_wait_time=None):
         """ This method gets the raw time series from the data source.
         """
@@ -128,7 +128,7 @@ class PandasDatareaderDownloader(AbstractDownloader):
         raise NotImplementedError('Must be implemented by the base class.')
 
     # Implement abstractmethod
-    def _download_raw_time_series(self, base_ticker, start=None, end=None, frequency=None, 
+    def _download_raw_time_series(self, base_ticker, start=None, end=None, frequency=None,
                                   period=None, session=None, max_wait_time=None):
         """ This method gets the raw time series from the data source.
         """
@@ -137,9 +137,7 @@ class PandasDatareaderDownloader(AbstractDownloader):
 
         if (frequency is not None) and (frequency not in ('1d', 'd')):
             raise NotImplementedError(f'"frequency" has value {frequency} but is not implemented.')
-
-        data = web.DataReader(base_ticker, self.data_source, start=start, end=end, session=session)
-        return data
+        return web.DataReader(base_ticker, self.data_source, start=start, end=end, session=session)
 
     def _format_input_arguments(self, start=None, end=None, frequency=None, period=None):
         """ Make adjustments to input arguments so they can be processed by pandas_datareader.
@@ -185,8 +183,8 @@ class FamaFrenchDownloader(PandasDatareaderDownloader):
                                   period=None, session=None, max_wait_time=None):
         """ This method gets the raw time series from the data source.
         """
-        raw_data = super()._download_raw_time_series(base_ticker, self.data_source, 
-                        start=start, end=end, freq=frequency, session=session)
+        raw_data = super()._download_raw_time_series(base_ticker,
+                        start=start, end=end, frequency=frequency, session=session)
             
         # Get the monthly data/daily data
         # The 0-th index is the daily or monthly data - the 1-st index is annual data
@@ -461,7 +459,7 @@ class InteractiveBrokersDownloader(AbstractDownloader):
                     raise ValueError('No connection to Interactive Brokers is detected. Try logging in.')
 
     # Implement abstractmethod
-    def _download_raw_time_series(self, base_ticker, start=None, end=None, frequency=None, 
+    def _download_raw_time_series(self, base_ticker, start=None, end=None, frequency=None,
                                   period=None, session=None, max_wait_time=None):
         """ This method downloads the raw time series using the InteractiveBroker's API.
         
